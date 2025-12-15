@@ -126,12 +126,14 @@ make run-shm
 
 - Valor testado: **N = 5.000.000**
 - Cada configuração foi executada **3 vezes**
-- O tempo considerado foi o **menor wall-clock**
-- As medições de tempo e recursos foram feitas com:
+- O tempo considerado foi o **menor `time_ms`** impresso pelo próprio programa
+- Para conferir o comportamento, também foi utilizado o comando `time` do shell, por exemplo:
 
 ```bash
-/usr/bin/time -v
+time ./primecount par 5000000 4 shm
 ```
+
+> Observação: em muitos ambientes `time` é uma *shell keyword* (builtin do shell) e **não** existe `/usr/bin/time`. Nessas situações, basta usar `time ./programa ...` sem `-v`. Caso a ferramenta externa `time` esteja instalada em `/usr/bin/time`, também é possível usar `/usr/bin/time -v` para obter métricas mais detalhadas.
 
 ---
 
@@ -145,7 +147,7 @@ Os valores abaixo foram obtidos a partir da própria saída do programa (`time_m
 | ---- | --- | --- | ---- | ------ | --------- |
 | seq  | 5e6 | –   | –    | 348513 | 627       |
 | par  | 5e6 | 4   | pipe | 348513 | 618       |
-| par  | 5e6 | 4   | shm  | 348513 | 625       |
+| par  | 5e6 | 4   | shm  | 348513 | 620       |
 
 ---
 
@@ -159,7 +161,7 @@ $$Speedup = \frac{T_{seq}}{T_{par}}$$
   $$\frac{627}{618} \approx 1.01\times$$
 
 - **Shared Memory (P=4):**
-  $$\frac{627}{625} \approx 1.00\times$$
+  $$\frac{627}{620} \approx 1.01\times$$
 
 ---
 
@@ -194,7 +196,7 @@ Isso ocorre devido ao mecanismo de **Copy-on-Write (COW)** do Linux, que permite
 
 ### 9.4 Pipe vs Shared Memory
 
-Os tempos medidos para `pipe` (618 ms) e `shm` (625 ms) ficaram muito próximos, o que indica que, para este valor específico de \(N\) e \(P\), **nenhum dos mecanismos se destacou de forma clara**.
+Os tempos medidos para `pipe` (618 ms) e `shm` (620 ms) ficaram muito próximos, o que indica que, para este valor específico de \(N\) e \(P\), **nenhum dos mecanismos se destacou de forma clara**.
 
 Ainda assim, conceitualmente:
 
