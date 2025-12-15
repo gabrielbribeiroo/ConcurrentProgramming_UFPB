@@ -139,11 +139,13 @@ make run-shm
 
 ### Tabela de Resultados
 
-| Modo | N   | P   | IPC  | Primos | Wall Time (s) | User (s) | Sys (s) | Max RSS (KB) |
-| ---- | --- | --- | ---- | ------ | ------------- | -------- | ------- | ------------ |
-| seq  | 5e6 | –   | –    | 348513 | 1.08          | 1.14     | 0.00    | 3584         |
-| par  | 5e6 | 4   | pipe | 348513 | 0.67          | 2.13     | 0.01    | 3712         |
-| par  | 5e6 | 4   | shm  | 348513 | 0.58          | 1.82     | 0.00    | 3584         |
+Os valores abaixo foram obtidos a partir da própria saída do programa (`time_ms`) para \(N = 5.000.000\):
+
+| Modo | N   | P   | IPC  | Primos | Time (ms) |
+| ---- | --- | --- | ---- | ------ | --------- |
+| seq  | 5e6 | –   | –    | 348513 | 627       |
+| par  | 5e6 | 4   | pipe | 348513 | 618       |
+| par  | 5e6 | 4   | shm  | 348513 | 625       |
 
 ---
 
@@ -154,11 +156,11 @@ O speedup foi calculado como:
 $$Speedup = \frac{T_{seq}}{T_{par}}$$
 
 - **Pipe (P=4):**
-  $$\frac{1.08}{0.67} \approx 1.61\times$$
+  $$\frac{627}{618} \approx 1.01\times$$
 
 - **Shared Memory (P=4):**
-  $$\frac{1.08}{0.58} \approx 1.86\times$$
-  
+  $$\frac{627}{625} \approx 1.00\times$$
+
 ---
 
 ## 9. Análise e Explicação (Parte E)
@@ -172,7 +174,7 @@ Esta seção foi estruturada para atender explicitamente aos itens solicitados n
 
 ### 9.1 Speedup Observado
 
-O uso de paralelismo trouxe ganho significativo de desempenho. Entretanto, o speedup ficou abaixo do ideal linear (4×).
+O uso de paralelismo trouxe um ganho **pequeno**, com speedup muito próximo de \(1\times\). Ou seja, para \(N = 5.000.000\) e \(P = 4\), a versão concorrente não chegou a produzir um aumento expressivo de desempenho em relação à versão sequencial.
 
 ### 9.2 Por que o Speedup não é Linear?
 
@@ -182,6 +184,8 @@ Os principais fatores observados foram:
 - Desbalanceamento de carga, pois o teste de primalidade é mais custoso para números maiores
 - Limitações de hardware, escalonamento e contenção de cache
 
+No cenário específico medido, esses fatores de overhead praticamente compensaram o potencial ganho de paralelismo, resultando em tempos muito próximos entre as versões sequencial e concorrentes.
+
 ### 9.3 Consumo de Memória
 
 O consumo de memória permaneceu praticamente constante entre as versões.
@@ -190,11 +194,14 @@ Isso ocorre devido ao mecanismo de **Copy-on-Write (COW)** do Linux, que permite
 
 ### 9.4 Pipe vs Shared Memory
 
-A versão com memória compartilhada apresentou melhor desempenho:
+Os tempos medidos para `pipe` (618 ms) e `shm` (625 ms) ficaram muito próximos, o que indica que, para este valor específico de \(N\) e \(P\), **nenhum dos mecanismos se destacou de forma clara**.
 
-- Pipes envolvem chamadas de sistema e cópia kernel↔user
-- Shared memory permite acesso direto à RAM após o setup inicial
-- Isso explica o menor tempo total e menor sys time observado no SHM
+Ainda assim, conceitualmente:
+
+- Pipes envolvem chamadas de sistema e cópia kernel↔user.
+- Shared memory permite acesso direto à RAM após o setup inicial, potencialmente reduzindo overhead de comunicação.
+
+Em cenários com maior volume de dados trocados entre processos, seria esperado que a solução com memória compartilhada apresentasse vantagem mais visível.
 
 ---
 
