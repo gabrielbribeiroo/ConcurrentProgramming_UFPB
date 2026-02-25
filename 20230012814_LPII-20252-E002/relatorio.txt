@@ -1,0 +1,59 @@
+RELATÓRIO — Exercício Prático 002 (Programação Concorrente)
+Aluno: 20230012814
+============================================================
+
+1. QUANTOS MUTEXES E POR QUÊ
+------------------------------------------------------------
+Foram utilizados 6 mutexes no total:
+
+• 5 mutexes de fileira (mutex_fileira[0..4]) — um para cada fileira
+  da sala de cinema. A decisão de usar um mutex por fileira, em vez
+  de um único mutex global, permite maior paralelismo: clientes que
+  tentam reservar em fileiras diferentes podem operar simultaneamente,
+  sem bloqueio mútuo desnecessário.
+
+• 1 mutex de estatísticas (mutex_estatisticas) — protege os contadores
+  reservas_sucesso e reservas_falha. Separar este mutex dos mutexes
+  de fileira evita que a atualização dos contadores bloqueie a reserva
+  de assentos em outras fileiras.
+
+2. ONDE COLOCOU LOCK/UNLOCK E JUSTIFICATIVA
+------------------------------------------------------------
+a) Na função tentar_reserva(cliente_id, fileira):
+   - pthread_mutex_lock(&mutex_fileira[fileira]) no início da função.
+   - pthread_mutex_unlock(&mutex_fileira[fileira]) antes de cada return.
+   Justificativa: a verificação de dois assentos adjacentes livres e a
+   marcação como ocupados DEVEM ser atômicas. Se não forem, outra thread
+   pode ler os assentos como livres entre a verificação e a escrita,
+   causando reserva duplicada do mesmo par.
+
+b) Na função cliente(), ao incrementar reservas_sucesso ou reservas_falha:
+   - pthread_mutex_lock(&mutex_estatisticas) antes do incremento.
+   - pthread_mutex_unlock(&mutex_estatisticas) depois do incremento.
+   Justificativa: operações de incremento (leitura + soma + escrita) não
+   são atômicas em C. Sem mutex, atualizações simultâneas podem perder
+   incrementos, gerando contadores incorretos.
+
+3. O QUE PODERIA ACONTECER SEM A PROTEÇÃO
+------------------------------------------------------------
+Sem os mutexes nas seções críticas, os seguintes problemas ocorreriam:
+
+• Reserva duplicada: dois clientes poderiam verificar o mesmo par de
+  assentos como livres e ambos escreveriam seus IDs. O último a escrever
+  sobrescreveria o primeiro, resultando em um cliente "fantasma" que
+  acredita ter reservado, mas cujo ID não aparece no mapa.
+
+• Contadores inconsistentes: incrementos simultâneos em reservas_sucesso
+  e reservas_falha poderiam se perder (race condition clássica de
+  read-modify-write), fazendo com que a soma sucesso + falha != 20.
+
+• Falha na verificação de integridade: assentos_ocupados != 2 × sucesso,
+  evidenciando corrupção de dados compartilhados.
+
+OBSERVAÇÃO SOBRE USO DE LLM
+------------------------------------------------------------
+Este código foi desenvolvido com auxílio do modelo de linguagem Gemini
+(Google DeepMind), utilizado para estruturar a solução, definir a
+estratégia de sincronização (mutex por fileira vs. global) e revisar
+a corretude das seções críticas. A lógica do programa e as decisões
+de projeto foram validadas e compreendidas pelo aluno.
