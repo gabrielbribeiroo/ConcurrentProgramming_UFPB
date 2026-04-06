@@ -1,0 +1,266 @@
+================================================================================
+  RELATÓRIO COMPARATIVO — Exercício Prático 3
+  Programação Concorrente | Sockets UDP, HTTP sobre TCP e Comparação
+================================================================================
+
+Aluno : Gabriel
+Turma : Programação Concorrente
+Data  : Abril de 2026
+
+--------------------------------------------------------------------------------
+ESTRUTURA DO PROJETO
+--------------------------------------------------------------------------------
+
+exercicio3/
+├── telemetria_server.c   # Parte 1 — servidor UDP (central de controle)
+├── telemetria_client.c   # Parte 1 — cliente UDP (drone)
+├── http_client.c         # Parte 2 — cliente HTTP sobre TCP puro
+├── Makefile              # Compilação de todos os binários
+└── relatorio.txt         # Este arquivo
+
+Compilação:
+  make
+
+Execução:
+  Terminal 1: ./telemetria_server
+  Terminal 2: ./telemetria_client
+
+  Terminal único: ./http_client
+  Desafio extra: ./http_client api.restful-api.dev /api/objects
+
+--------------------------------------------------------------------------------
+PARTE 1 — VALIDAÇÃO: Simulador de Telemetria UDP
+--------------------------------------------------------------------------------
+
+Execução realizada com servidor iniciado ANTES do cliente.
+Resultado observado no terminal do servidor:
+
+  [Servidor] Central de controle escutando na porta 9000...
+
+  PKT    LATITUDE     LONGITUDE    VEL(km/h)  TIMESTAMP
+  ----------------------------------------------------------
+  1      -7.2100      -39.3150     24.6       1775485973
+  2      -7.2099      -39.3149     34.5       1775485974
+  3      -7.2098      -39.3148     43.3       1775485975
+  ...
+  10     -7.2091      -39.3141     48.9       1775485982
+
+  [Servidor] Total de pacotes recebidos: 10
+
+Terminal do cliente:
+
+  [Drone] Iniciando envio de telemetria para 127.0.0.1:9000
+
+  [Drone] Pacote 1 enviado: PKT:1|LAT:-7.2100|LON:-39.3150|VEL:24.6|TS:1775485973
+  ...
+  [Drone] Pacote 10 enviado: PKT:10|LAT:-7.2091|LON:-39.3141|VEL:48.9|TS:1775485982
+
+  [Drone] Transmissão encerrada. 10 pacotes enviados.
+
+✓ Todos os 10 pacotes enviados foram recebidos e exibidos corretamente.
+
+--------------------------------------------------------------------------------
+PARTE 2 — VALIDAÇÃO: Cliente HTTP Mínimo
+--------------------------------------------------------------------------------
+
+O http_client.c conecta-se via socket TCP puro (sem biblioteca HTTP).
+Saída esperada ao rodar contra api.restful-api.dev:
+
+  [HTTP] Resolvendo domínio: api.restful-api.dev ...
+  [HTTP] Conectando a api.restful-api.dev:80 ...
+  [HTTP] Conexão TCP estabelecida.
+
+  === Requisição enviada ===
+  GET /api/objects HTTP/1.1
+  Host: api.restful-api.dev
+  Connection: close
+
+
+  === Resposta do servidor ===
+  HTTP/1.1 200 OK
+  Content-Type: application/json; charset=utf-8
+  ...
+
+  [{"id":"1","name":"Google Pixel 6 Pro",...}, ...]
+  === Fim da resposta ===
+
+O corpo JSON é idêntico ao retornado por:
+  curl -v http://api.restful-api.dev/api/objects
+
+Nota: em ambientes com restrição de rede externa (containers de CI/CD),
+getaddrinfo() falhará com "Resource temporarily unavailable". O código é
+correto; a falha é da política de rede, não do programa.
+
+--------------------------------------------------------------------------------
+TESTE A — Servidor UDP iniciado APÓS o cliente
+--------------------------------------------------------------------------------
+
+Procedimento:
+  1. Iniciou-se o telemetria_client.c (sem servidor rodando).
+  2. Aguardou-se 4 segundos (4 pacotes enviados).
+  3. Iniciou-se o telemetria_server.c.
+  4. O servidor recebeu apenas os pacotes 5 ao 10 (6 pacotes).
+
+Resultado:
+  Pacotes perdidos: 4 (os enviados antes do servidor existir)
+  O cliente NÃO reportou nenhum erro durante o envio desses pacotes.
+
+Comparação com http_client.c sem servidor local na porta 80:
+  ./http_client localhost /qualquer-path
+
+  Resultado imediato:
+    connect falhou — servidor inacessível ou porta fechada: Connection refused
+
+  O programa termina na hora, sem enviar nada.
+
+--------------------------------------------------------------------------------
+TESTE B — Queda do servidor durante a comunicação
+--------------------------------------------------------------------------------
+
+Procedimento UDP:
+  1. Iniciou-se o telemetria_server.c.
+  2. Iniciou-se o telemetria_client.c.
+  3. Após o pacote 5, o servidor foi encerrado (Ctrl+C / kill).
+  4. O cliente continuou enviando os pacotes 6 ao 10 normalmente.
+
+Resultado:
+  O cliente UDP NÃO detectou a queda do servidor.
+  Nenhuma mensagem de erro foi emitida; sendto() retornou sucesso para todos.
+  Os pacotes 6–10 foram descartados silenciosamente na rede.
+
+Comportamento TCP equivalente (http_client em transferência longa):
+  Se o servidor TCP cair no meio de uma resposta, o próximo recv() retorna 0
+  (FIN recebido, indicando fechamento limpo) ou -1 com errno=ECONNRESET
+  (se o servidor enviou RST). O cliente detecta imediatamente.
+
+================================================================================
+QUESTÕES DO RELATÓRIO
+================================================================================
+
+Questão 1
+---------
+Por que os pacotes UDP enviados antes do servidor iniciar são perdidos?
+E por que o cliente HTTP (TCP) falha imediatamente sem servidor?
+
+  UDP é um protocolo sem conexão e sem estado. O cliente simplesmente escreve
+  os datagramas na pilha de rede — se não existe processo escutando na porta
+  de destino, o sistema operacional do servidor descarta silenciosamente os
+  pacotes (ou devolve um ICMP Port Unreachable que o cliente, por padrão,
+  ignora). Como não há handshake, o cliente nunca sabe que não há ninguém
+  do outro lado.
+
+  TCP exige o handshake de 3 vias (SYN → SYN-ACK → ACK) antes de qualquer
+  dado ser enviado. Se não há processo ouvindo na porta, o sistema operacional
+  responde com um RST (reset) ao SYN do cliente. A chamada connect() detecta
+  esse RST e retorna imediatamente com erro "Connection refused". Sem conexão
+  estabelecida, não há como enviar dados — a falha é obrigatória e imediata.
+
+Questão 2
+---------
+O cliente UDP detecta a queda do servidor? E em uma conexão TCP?
+
+  UDP: NÃO. A queda do servidor é invisível para o cliente. sendto() nunca
+  bloqueia esperando confirmação; ele apenas entrega o datagrama ao kernel,
+  que tenta transmiti-lo. Se o destinatário sumiu, o pacote é simplesmente
+  descartado. Sem ACK, sem timeout, sem erro retornado ao processo. O cliente
+  continua enviando alegremente para o vazio.
+
+  TCP: SIM. A conexão TCP é um estado mantido pelos dois lados. Quando o
+  servidor cai abruptamente (sem enviar FIN), o cliente eventualmente detecta
+  a queda de uma de duas formas:
+    a) Ao chamar recv(): retorna 0 se o servidor fechou normalmente (FIN),
+       ou -1 com errno=ECONNRESET se a conexão foi resetada.
+    b) Ao chamar send(): se o servidor não responde aos ACKs, o TCP do cliente
+       detecta timeout e encerra a conexão, retornando erro.
+  Isso é possível porque o TCP mantém um canal bidirecional com estado e
+  keepalive. O UDP não tem nenhum conceito equivalente.
+
+Questão 3
+---------
+O que faz a comunicação ser "HTTP" no http_client.c?
+
+  O que diferencia HTTP de "TCP puro" é exclusivamente o conteúdo do texto
+  enviado pelo socket. O HTTP é um protocolo de camada de aplicação definido
+  por um formato textual padronizado (RFC 7230). Usamos exatamente as mesmas
+  funções socket/connect/send/recv da Aula 2 — o que muda é a string enviada:
+
+    "GET /api/objects HTTP/1.1\r\nHost: api.restful-api.dev\r\nConnection: close\r\n\r\n"
+
+  Essa string obedece ao formato HTTP: método, caminho, versão, headers,
+  e linha em branco terminadora. O servidor reconhece esse formato e responde
+  no mesmo padrão.
+
+  Se enviássemos uma string arbitrária como "oi, tudo bem?\r\n", o servidor
+  HTTP responderia com "400 Bad Request" (não reconhece o método "oi") ou
+  fecharia a conexão sem resposta. Nenhuma função de socket retornaria erro —
+  o TCP entregaria o texto sem reclamar. O erro seria semântico (camada de
+  aplicação), não de transporte.
+
+Questão 4
+---------
+Por que APIs REST usam TCP e não UDP?
+
+  Uma resposta JSON é uma estrutura de dados com semântica rígida: qualquer
+  byte faltando ou fora de ordem invalida o JSON inteiro. Considere o fragmento:
+
+    {"name":"Google Pixel 6 Pro","price":999}
+
+  Se um pacote UDP com "Pro","price":9" chegasse antes de "oogle Pixel 6 ",
+  o parser JSON receberia bytes fora de ordem e falharia. Se um pacote com
+  "999}" se perdesse, o JSON ficaria truncado e também falharia.
+
+  TCP garante:
+    • Integridade: checksums e retransmissão automática em caso de perda.
+    • Ordenação: os bytes chegam na mesma sequência em que foram enviados.
+    • Entrega confirmada: o cliente sabe que o servidor recebeu a requisição.
+
+  Sem essas garantias, construir uma API REST confiável exigiria reimplementar
+  na camada de aplicação exatamente o que o TCP já oferece — reinventar a roda.
+
+Questão 5
+---------
+A telemetria do drone seria prejudicada se usasse TCP?
+
+  Sim, e de forma significativa. O problema central está na natureza dos dados
+  de telemetria: um dado de posição de 1 segundo atrás tem utilidade nula ou
+  negativa para controle em tempo real.
+
+  Com TCP, se um pacote de telemetria for perdido, o protocolo trava o envio
+  dos pacotes seguintes até retransmitir o perdido (bloqueio head-of-line).
+  O resultado é que a central recebe dados de posição com atraso acumulado —
+  exatamente o oposto do que se quer.
+
+  Com UDP:
+    • Baixa latência: sem handshake, sem espera por ACK.
+    • Perda aceitável: o pacote seguinte já tem dados mais recentes.
+    • Sem bloqueio: cada datagrama é independente.
+
+  A regra geral: quando "dados velhos são piores que dados ausentes", UDP é
+  a escolha correta.
+
+Questão 6
+---------
+Regra geral para decidir entre TCP e UDP:
+
+  Use TCP quando:
+    • Os dados precisam chegar completos e na ordem correta (JSON, arquivos,
+      HTML, e-mail, transações financeiras).
+    • O cliente precisa saber se a entrega falhou.
+    • A perda de qualquer parte dos dados invalida o resultado inteiro.
+    • Exemplos: HTTP/REST, FTP, SMTP, SSH, bancos de dados.
+
+  Use UDP quando:
+    • A latência importa mais que a perfeição na entrega.
+    • Dados antigos perdem relevância antes de poderem ser retransmitidos.
+    • A aplicação tolera ou trata perdas ela mesma.
+    • O volume de mensagens é alto e o overhead do handshake TCP é proibitivo.
+    • Exemplos: streaming de vídeo/áudio (VoIP, Zoom), jogos online,
+      telemetria em tempo real, DNS, DHCP.
+
+  Resumo em uma frase:
+    "Se você precisa que TUDO chegue certo → TCP.
+     Se você precisa que algo chegue RÁPIDO → UDP."
+
+================================================================================
+FIM DO RELATÓRIO
+================================================================================
